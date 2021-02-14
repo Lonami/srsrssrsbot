@@ -1,3 +1,5 @@
+mod feed;
+
 use grammers_client::{Client, Config, Update};
 use grammers_session::FileSession;
 use log;
@@ -26,44 +28,6 @@ static STR_NOT_IMPLEMENTED: &str = "Not yet implemented.";
 
 #[tokio::main]
 async fn main() {
-    let http = reqwest::Client::new();
-
-    let xml = http
-        .get(OLD_FEED)
-        .send()
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
-
-    let feed = feed_rs::parser::parse(xml.as_ref()).unwrap();
-    let entries = feed
-        .entries
-        .into_iter()
-        .map(|entry| entry.id)
-        .collect::<HashSet<_>>();
-
-    let xml = http
-        .get(NEW_FEED)
-        .send()
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
-
-    let mut feed = feed_rs::parser::parse(xml.as_ref()).unwrap();
-    feed.entries.retain(|entry| !entries.contains(&entry.id));
-
-    feed.entries.into_iter().for_each(|entry| {
-        println!(
-            "New entry {}:\n  {}",
-            entry.id,
-            entry.title.unwrap().content
-        );
-    });
-
     SimpleLogger::new()
         .with_level(match LOG_LEVEL {
             "ERROR" => log::LevelFilter::Error,

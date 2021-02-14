@@ -1297,6 +1297,7 @@ dependencies = [
 name = "srsrssrsbot"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "feed-rs",
  "grammers-client",
  "grammers-session",
