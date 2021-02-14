@@ -1,4 +1,4 @@
-use grammers_client::{Client, Config, InitParams};
+use grammers_client::{Client, Config, Update};
 use grammers_session::FileSession;
 use log;
 use simple_logger::SimpleLogger;
@@ -16,6 +16,13 @@ static TG_API_HASH: &str = env!("TG_API_HASH");
 static BOT_TOKEN: &str = env!("BOT_TOKEN");
 
 static SESSION_NAME: &str = "srsrssrs.session";
+
+// Strings.
+static STR_WELCOME: &str = r#"Hi, I'm srsrssrs, a serious RSS Rust bot. Sorry if it gave you a stroke to read that.
+
+To get started, /add <FEED URL>. If you get tired of the feed, use /rm <FEED URL>. You can view what feeds you're subscribed to with /ls."#;
+
+static STR_NOT_IMPLEMENTED: &str = "Not yet implemented.";
 
 #[tokio::main]
 async fn main() {
@@ -74,11 +81,7 @@ async fn main() {
         session: FileSession::load_or_create(SESSION_NAME).unwrap(),
         api_id,
         api_hash: TG_API_HASH.to_string(),
-        params: InitParams {
-            // Fetch the updates we missed while we were offline
-            catch_up: true,
-            ..Default::default()
-        },
+        params: Default::default(),
     })
     .await
     .unwrap();
@@ -91,7 +94,49 @@ async fn main() {
         client.session().save().unwrap();
     }
 
-    while let Some(_updates) = client.next_updates().await.unwrap() {
-        println!("Got updates");
+    let mut tg = client.handle();
+
+    // Need the `client` to be stepping the network, or the handle methods will never complete.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::task::spawn(async move {
+        loop {
+            match client.next_updates().await {
+                Ok(Some(updates)) => {
+                    updates.for_each(|update| tx.send(update).map_err(drop).unwrap());
+                }
+                Ok(None) => {
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Error reading updates: {}", e);
+                }
+            }
+        }
+        client
+    });
+
+    while let Some(update) = rx.recv().await {
+        match update {
+            Update::NewMessage(message) if !message.outgoing() => {
+                if message.text().starts_with("/start") || message.text().starts_with("/help") {
+                    tg.send_message(&message.chat(), STR_WELCOME.into())
+                        .await
+                        .unwrap();
+                } else if message.text().starts_with("/add") {
+                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+                        .await
+                        .unwrap();
+                } else if message.text().starts_with("/rm") {
+                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+                        .await
+                        .unwrap();
+                } else if message.text().starts_with("/ls") {
+                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+                        .await
+                        .unwrap();
+                }
+            }
+            _ => {}
+        };
     }
 }
