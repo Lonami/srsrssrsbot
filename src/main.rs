@@ -26,6 +26,20 @@ To get started, /add <FEED URL>. If you get tired of the feed, use /rm <FEED URL
 
 static STR_NOT_IMPLEMENTED: &str = "Not yet implemented.";
 
+static STR_NO_URL: &str = "You need to include the URL after the command.";
+
+fn str_try_add(url: &str) -> String {
+    format!("Trying to add {}...", url)
+}
+
+fn str_add_ok(url: &str) -> String {
+    format!("Added {} to your list of feeds.", url)
+}
+
+fn str_add_err(url: &str, e: feed::Error) -> String {
+    format!("Failed to add {} to your list of feeds: {}.", url, e)
+}
+
 #[tokio::main]
 async fn main() {
     SimpleLogger::new()
@@ -39,6 +53,8 @@ async fn main() {
         })
         .init()
         .unwrap();
+
+    let http = reqwest::Client::new();
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
@@ -87,9 +103,25 @@ async fn main() {
                         .await
                         .unwrap();
                 } else if message.text().starts_with("/add") {
-                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-                        .await
-                        .unwrap();
+                    if let Some(url) = message.text().split_whitespace().nth(1) {
+                        let mut sent = tg
+                            .send_message(&message.chat(), str_try_add(url).into())
+                            .await
+                            .unwrap();
+
+                        match feed::Feed::new(&http, url, message.sender().unwrap().id()).await {
+                            Ok(_) => {
+                                sent.edit(str_add_ok(url).into()).await.unwrap();
+                            }
+                            Err(e) => {
+                                sent.edit(str_add_err(url, e).into()).await.unwrap();
+                            }
+                        }
+                    } else {
+                        tg.send_message(&message.chat(), STR_NO_URL.into())
+                            .await
+                            .unwrap();
+                    }
                 } else if message.text().starts_with("/rm") {
                     tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
                         .await
