@@ -1,19 +1,9 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use reqwest::{header, StatusCode};
-use std::time::Duration;
 use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
 
-/// Maximum cache delay we're willing to accept.
-///
-/// A bad-behaved server might put an absurd amount for the `max-age`, and then we would never
-/// check that feed again.
-const MAX_FETCH_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// If the server does not have any max age or expiration for the feed, use a default delay.
-const DEFAULT_FETCH_DELAY: Duration = Duration::from_secs(10 * 60);
-
-struct Feed {
+pub struct Feed {
     url: String,
     users: Vec<i32>,
     seen_entries: HashSet<String>,
@@ -23,7 +13,7 @@ struct Feed {
 }
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     ReadError(reqwest::Error),
     ParseError(feed_rs::parser::ParseFeedError),
     MalformedHeader(header::HeaderName),
@@ -37,22 +27,58 @@ fn header(headers: &header::HeaderMap, key: header::HeaderName) -> Result<Option
 }
 
 fn find_expiry(headers: &header::HeaderMap) -> Result<Instant, Error> {
+    // Can't use constants here, `Duration::seconds` is not a const-fn as of 0.4.19.
+    //
+    // Maximum cache delay we're willing to accept.
+    //
+    // A bad-behaved server might put an absurd amount for the `max-age`, and then we would never
+    // check that feed again.
+    let max_fetch_delay: Duration = Duration::seconds(24 * 60 * 60);
+
+    // If the server returns a very small value (or even in the past), use this instead.
+    let min_fetch_delay: Duration = Duration::seconds(60);
+
+    // If the server does not have any max age or expiration for the feed, use a default delay.
+    let default_fetch_delay: Duration = Duration::seconds(10 * 60);
+
     let now = Utc::now();
-    let delay = if let Some(_cache_control) = header(headers, header::CACHE_CONTROL)? {
-        todo!()
+    let delay = if let Some(cache_control) = header(headers, header::CACHE_CONTROL)? {
+        let seconds = cache_control.split(",").find_map(|directive| {
+            let mut parts = directive.split("=");
+            let key = parts.next()?;
+            let value = parts.next()?;
+            if key.to_lowercase() == "max-age" {
+                Some(value)
+            } else {
+                None
+            }
+        });
+        if let Some(seconds) = seconds {
+            Duration::seconds(
+                seconds
+                    .parse::<i64>()
+                    .map_err(|_| Error::MalformedHeader(header::CACHE_CONTROL))?,
+            )
+        } else {
+            default_fetch_delay
+        }
     } else if let Some(expiry) = header(headers, header::EXPIRES)? {
         let expires = DateTime::parse_from_rfc2822(expiry)
             .map(DateTime::<Utc>::from)
             .map_err(|_| Error::MalformedHeader(header::EXPIRES))?;
 
-        // If expiry date is less than now, `std::time::Duration` cannot represent it.
-        // This means that the server time is either wrong or we took too long to fetch.
-        (expires - now).to_std().unwrap_or(DEFAULT_FETCH_DELAY)
+        expires - now
     } else {
-        DEFAULT_FETCH_DELAY
+        default_fetch_delay
     };
 
-    Ok(Instant::now() + delay.min(MAX_FETCH_DELAY))
+    // Can't panic, `max(MIN_FETCH_DELAY)` will make it positive, so `to_std()` succeeds.
+    Ok(Instant::now()
+        + delay
+            .min(max_fetch_delay)
+            .max(min_fetch_delay)
+            .to_std()
+            .unwrap())
 }
 
 impl Feed {
