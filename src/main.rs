@@ -1,6 +1,10 @@
 use grammers_client::{Client, Config, InitParams};
 use grammers_session::FileSession;
+use log;
+use simple_logger::SimpleLogger;
 use std::collections::HashSet;
+
+static LOG_LEVEL: &str = env!("LOG_LEVEL");
 
 // Fetch an old feed and then its updated variant to figure out how "new entries" works.
 static OLD_FEED: &str = env!("OLD_FEED");
@@ -52,6 +56,18 @@ async fn main() {
             entry.title.unwrap().content
         );
     });
+
+    SimpleLogger::new()
+        .with_level(match LOG_LEVEL {
+            "ERROR" => log::LevelFilter::Error,
+            "WARN" => log::LevelFilter::Warn,
+            "INFO" => log::LevelFilter::Info,
+            "DEBUG" => log::LevelFilter::Debug,
+            "TRACE" => log::LevelFilter::Trace,
+            _ => log::LevelFilter::Off,
+        })
+        .init()
+        .unwrap();
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
