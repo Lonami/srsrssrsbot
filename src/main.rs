@@ -4,7 +4,7 @@ use grammers_client::{Client, Config, Update};
 use grammers_session::FileSession;
 use log;
 use simple_logger::SimpleLogger;
-use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashSet};
 
 static LOG_LEVEL: &str = env!("LOG_LEVEL");
 
@@ -53,6 +53,8 @@ async fn main() {
         })
         .init()
         .unwrap();
+
+    let mut feeds = BinaryHeap::new();
 
     let http = reqwest::Client::new();
 
@@ -110,8 +112,9 @@ async fn main() {
                             .unwrap();
 
                         match feed::Feed::new(&http, url, message.sender().unwrap().id()).await {
-                            Ok(_) => {
+                            Ok(feed) => {
                                 sent.edit(str_add_ok(url).into()).await.unwrap();
+                                feeds.push(feed);
                             }
                             Err(e) => {
                                 sent.edit(str_add_err(url, e).into()).await.unwrap();

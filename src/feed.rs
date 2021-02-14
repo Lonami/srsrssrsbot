@@ -132,6 +132,28 @@ impl Feed {
     }
 }
 
+impl PartialEq for Feed {
+    fn eq(&self, other: &Self) -> bool {
+        self.next_fetch == other.next_fetch && self.url == other.url
+    }
+}
+
+impl Eq for Feed {}
+
+impl PartialOrd for Feed {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Feed {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.next_fetch
+            .cmp(&other.next_fetch)
+            .then_with(|| self.url.cmp(&other.url))
+    }
+}
+
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
         Self::ReadError(e)
