@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use reqwest::header;
+use reqwest::{header, StatusCode};
 use std::time::Duration;
 use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
@@ -57,7 +57,7 @@ fn find_expiry(headers: &header::HeaderMap) -> Result<Instant, Error> {
 
 impl Feed {
     pub async fn new(http: &reqwest::Client, url: &str, user_id: i32) -> Result<Self, Error> {
-        let resp = http.get(url).send().await?;
+        let resp = http.get(url).send().await?.error_for_status()?;
         let last_fetch = Utc::now();
         let next_fetch = find_expiry(resp.headers())?;
         let etag = header(resp.headers(), header::ETAG)?.map(String::from);
@@ -92,8 +92,12 @@ impl Feed {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
 
-        let xml = request.send().await?.bytes().await?;
+        let resp = request.send().await?.error_for_status()?;
+        if resp.status().as_u16() == StatusCode::NOT_MODIFIED {
+            return Ok(Vec::new());
+        }
 
+        let xml = resp.bytes().await?;
         let mut feed = feed_rs::parser::parse(xml.as_ref())?;
         feed.entries
             .retain(|entry| !self.seen_entries.contains(&entry.id));
