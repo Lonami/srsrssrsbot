@@ -1,18 +1,13 @@
 mod feed;
 
-use grammers_client::{Client, ClientHandle, Config, Update};
-use grammers_session::FileSession;
+use grammers_client::{Client, Config, Update};
+use grammers_session::Session;
 use log;
-use mpsc::{Sender, UnboundedSender};
 use simple_logger::SimpleLogger;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BinaryHeap};
 use tokio::sync::mpsc;
 
 static LOG_LEVEL: &str = env!("LOG_LEVEL");
-
-// Fetch an old feed and then its updated variant to figure out how "new entries" works.
-static OLD_FEED: &str = env!("OLD_FEED");
-static NEW_FEED: &str = env!("NEW_FEED");
 
 // Values required by Telegram.
 static TG_API_ID: &str = env!("TG_API_ID");
@@ -43,9 +38,9 @@ fn str_add_err(url: &str, e: feed::Error) -> String {
 }
 
 async fn step_network(
-    mut tg: Client<FileSession>,
+    tg: Client,
     tx: mpsc::UnboundedSender<Update>,
-) -> Client<FileSession> {
+) -> Client {
     loop {
         match tg.next_updates().await {
             Ok(Some(updates)) => {
@@ -62,7 +57,7 @@ async fn step_network(
     tg
 }
 
-async fn step_updates(mut tg: ClientHandle, mut rx: mpsc::UnboundedReceiver<Update>) {
+async fn step_updates(mut tg: Client, mut rx: mpsc::UnboundedReceiver<Update>) {
     let http = reqwest::Client::new();
     let mut feeds = BinaryHeap::new();
 
@@ -125,7 +120,7 @@ async fn main() {
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
-        session: FileSession::load_or_create(SESSION_NAME).unwrap(),
+        session: Session::load_file_or_create(SESSION_NAME).unwrap(),
         api_id,
         api_hash: TG_API_HASH.to_string(),
         params: Default::default(),
@@ -138,12 +133,10 @@ async fn main() {
             .bot_sign_in(BOT_TOKEN, api_id, TG_API_HASH)
             .await
             .unwrap();
-        client.session().save().unwrap();
+        client.session().save_to_file(SESSION_NAME).unwrap();
     }
 
-    let mut tg = client.handle();
-
     // Need the `client` to be stepping the network, or the handle methods will never complete.
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::join!(step_updates(client.handle(), rx), step_network(client, tx));
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::join!(step_updates(client.clone(), rx), step_network(client, tx));
 }
