@@ -1,3 +1,4 @@
+mod db;
 mod feed;
 
 use grammers_client::client::chats::InvocationError;
@@ -26,6 +27,7 @@ static TG_API_ID: &str = env!("TG_API_ID");
 static TG_API_HASH: &str = env!("TG_API_HASH");
 static BOT_TOKEN: &str = env!("BOT_TOKEN");
 
+static DB_NAME: &str = "srsrssrs.db";
 static SESSION_NAME: &str = "srsrssrs.session";
 
 // Strings.
@@ -68,6 +70,7 @@ fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
 
 async fn handle_updates(
     mut tg: Client,
+    db: db::Database,
     feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>,
 ) -> Result<(), InvocationError> {
     let http = reqwest::Client::new();
@@ -92,6 +95,7 @@ async fn handle_updates(
                             {
                                 Ok(feed) => {
                                     sent.edit(str_add_ok(url).into()).await.unwrap();
+                                    db.add_feed(&feed).unwrap();
                                     feeds.lock().unwrap().push(feed);
                                 }
                                 Err(e) => {
@@ -155,6 +159,9 @@ async fn handle_feed(mut tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) 
 
 #[tokio::main]
 async fn main() {
+    let db = db::Database::new(DB_NAME).unwrap();
+    db.cleanup_feeds().unwrap();
+
     SimpleLogger::new()
         .with_level(match LOG_LEVEL {
             "ERROR" => log::LevelFilter::Error,
@@ -191,7 +198,7 @@ async fn main() {
         _ = tokio::signal::ctrl_c() => {
             println!("Got SIGINT; quitting early gracefully");
         }
-        r = handle_updates(client.clone(), Arc::clone(&feeds)) => {
+        r = handle_updates(client.clone(), db, Arc::clone(&feeds)) => {
             match r {
                 Ok(_) => println!("Got disconnected from Telegram gracefully"),
                 Err(e) => println!("Error during update handling: {}", e),

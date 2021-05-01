@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use grammers_client::types::chat::PackedChat;
 use reqwest::{header, StatusCode};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
 
@@ -135,6 +136,18 @@ impl Feed {
             .retain(|entry| !self.seen_entries.contains(&entry.id));
 
         Ok(feed.entries)
+    }
+
+    pub fn next_fetch_timestamp(&self) -> i64 {
+        let duration = self
+            .next_fetch
+            .checked_duration_since(Instant::now())
+            .unwrap_or_else(|| std::time::Duration::from_secs(0));
+
+        (SystemTime::now() + duration)
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
     }
 }
 
