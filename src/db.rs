@@ -102,6 +102,17 @@ impl Database {
                 stmt.bind::<&str>(2, entry_id)?;
                 while stmt.next()? != State::Done {}
             }
+
+            stmt = conn.prepare("DELETE FROM subscriber WHERE feed_id = ?")?;
+            stmt.bind(1, feed_id)?;
+            while stmt.next()? != State::Done {}
+
+            for sub in feed.users.iter() {
+                stmt = conn.prepare("INSERT INTO subscriber (feed_id, user) VALUES (?, ?)")?;
+                stmt.bind(1, feed_id)?;
+                stmt.bind(2, sub.to_bytes().as_slice())?;
+                while stmt.next()? != State::Done {}
+            }
         }
         conn.execute("COMMIT")?;
         Ok(())
@@ -146,14 +157,4 @@ impl Database {
 
         Ok(feeds.into_iter().map(|(_, v)| v).collect())
     }
-
-    /*
-    pub fn add_subscriber(&self, user: PackedChat) -> sqlite::Result<()> {
-        Ok(())
-    }
-
-    pub fn del_subscriber(&self, user: PackedChat) -> sqlite::Result<()> {
-        Ok(())
-    }
-    */
 }

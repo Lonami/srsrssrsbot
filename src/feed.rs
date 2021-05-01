@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
 
+#[derive(Debug)]
 pub struct Feed {
     pub url: String,
     pub users: Vec<PackedChat>,
