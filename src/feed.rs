@@ -1,11 +1,12 @@
 use chrono::{DateTime, Duration, Utc};
+use grammers_client::types::chat::PackedChat;
 use reqwest::{header, StatusCode};
 use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
 
 pub struct Feed {
     pub url: String,
-    pub users: Vec<i32>,
+    pub users: Vec<PackedChat>,
     pub seen_entries: HashSet<String>,
     pub last_fetch: DateTime<Utc>,
     pub next_fetch: Instant,
@@ -82,7 +83,7 @@ fn find_expiry(headers: &header::HeaderMap) -> Result<Instant, Error> {
 }
 
 impl Feed {
-    pub async fn new(http: &reqwest::Client, url: &str, user_id: i32) -> Result<Self, Error> {
+    pub async fn new(http: &reqwest::Client, url: &str, user: PackedChat) -> Result<Self, Error> {
         let resp = http.get(url).send().await?.error_for_status()?;
         let last_fetch = Utc::now();
         let next_fetch = find_expiry(resp.headers())?;
@@ -98,7 +99,7 @@ impl Feed {
 
         Ok(Self {
             url: url.to_string(),
-            users: vec![user_id],
+            users: vec![user],
             seen_entries,
             last_fetch,
             next_fetch,

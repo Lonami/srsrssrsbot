@@ -87,7 +87,8 @@ async fn handle_updates(
                                 .await
                                 .unwrap();
 
-                            match feed::Feed::new(&http, url, message.sender().unwrap().id()).await
+                            match feed::Feed::new(&http, url, message.sender().unwrap().pack())
+                                .await
                             {
                                 Ok(feed) => {
                                     sent.edit(str_add_ok(url).into()).await.unwrap();
@@ -120,7 +121,7 @@ async fn handle_updates(
     Ok(())
 }
 
-async fn handle_feed(_tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
+async fn handle_feed(mut tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
     let http = reqwest::Client::new();
 
     loop {
@@ -138,14 +139,10 @@ async fn handle_feed(_tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
 
         let mut feed = { feeds.lock().unwrap().pop().unwrap() };
         for entry in feed.check(&http).await.unwrap() {
-            for _user in feed.users.iter() {
-                let _text = str_new_entry(&entry);
-
-                /* TODO send message
-                tg.send_message(&Chat::new(tg.clone(), user), str_new_entry(&entry).into())
+            for user in feed.users.iter() {
+                tg.send_message(&user.unpack(), str_new_entry(&entry).into())
                     .await
                     .unwrap();
-                */
             }
         }
         feeds.lock().unwrap().push(feed);
