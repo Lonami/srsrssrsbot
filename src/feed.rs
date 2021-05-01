@@ -4,12 +4,12 @@ use std::{collections::HashSet, fmt};
 use tokio::time::Instant;
 
 pub struct Feed {
-    url: String,
-    users: Vec<i32>,
-    seen_entries: HashSet<String>,
-    last_fetch: DateTime<Utc>,
-    next_fetch: Instant,
-    etag: Option<String>,
+    pub url: String,
+    pub users: Vec<i32>,
+    pub seen_entries: HashSet<String>,
+    pub last_fetch: DateTime<Utc>,
+    pub next_fetch: Instant,
+    pub etag: Option<String>,
 }
 
 #[derive(Debug)]
