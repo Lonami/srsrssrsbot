@@ -120,6 +120,11 @@ impl Feed {
         }
 
         let resp = request.send().await?.error_for_status()?;
+        self.last_fetch = Utc::now();
+        self.next_fetch = match find_expiry(resp.headers()) {
+            Ok(expiry) => expiry,
+            Err(_) => Instant::now() + Duration::seconds(10 * 60).to_std().unwrap(),
+        };
         if resp.status().as_u16() == StatusCode::NOT_MODIFIED {
             return Ok(Vec::new());
         }
