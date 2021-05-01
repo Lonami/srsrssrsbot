@@ -125,19 +125,23 @@ async fn handle_feed(mut tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) 
     let http = reqwest::Client::new();
 
     loop {
-        match feeds.lock().unwrap().peek() {
-            Some(feed) => {
-                if let Some(delay) = feed.next_fetch.checked_duration_since(Instant::now()) {
-                    sleep(delay).await;
-                }
-            }
-            None => {
-                sleep(NO_FEED_DELAY).await;
-                continue;
+        let delay = {
+            match feeds.lock().unwrap().peek() {
+                Some(feed) => feed.next_fetch.checked_duration_since(Instant::now()),
+                None => Some(NO_FEED_DELAY),
             }
         };
 
-        let mut feed = { feeds.lock().unwrap().pop().unwrap() };
+        if let Some(delay) = delay {
+            sleep(delay).await;
+        }
+
+        let mut feed = {
+            match feeds.lock().unwrap().pop() {
+                Some(feed) => feed,
+                None => continue,
+            }
+        };
         for entry in feed.check(&http).await.unwrap() {
             for user in feed.users.iter() {
                 tg.send_message(&user.unpack(), str_new_entry(&entry).into())
