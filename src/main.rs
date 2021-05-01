@@ -186,8 +186,20 @@ async fn main() {
         client.session().save_to_file(SESSION_NAME).unwrap();
     }
 
-    tokio::join!(
-        handle_updates(client.clone(), Arc::clone(&feeds)),
-        handle_feed(client, Arc::clone(&feeds))
+    tokio::select!(
+        _ = tokio::signal::ctrl_c() => {
+            println!("Got SIGINT; quitting early gracefully");
+        }
+        r = handle_updates(client.clone(), Arc::clone(&feeds)) => {
+            match r {
+                Ok(_) => println!("Got disconnected from Telegram gracefully"),
+                Err(e) => println!("Error during update handling: {}", e),
+            }
+        }
+        _ = handle_feed(client.clone(), Arc::clone(&feeds)) => {
+            println!("Failed to check feed");
+        }
     );
+
+    client.session().save_to_file(SESSION_NAME).unwrap();
 }
