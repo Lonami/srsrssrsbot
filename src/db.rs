@@ -1,6 +1,10 @@
 use crate::feed::Feed;
+use chrono::{TimeZone, Utc};
 use sqlite::State;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::Instant;
 
 const VERSION: i64 = 1;
 
@@ -110,6 +114,37 @@ impl Database {
                 SELECT * FROM subscriber AS s WHERE s.feed_id = f.id
             )",
         )
+    }
+
+    pub fn load_feeds(&self) -> sqlite::Result<BinaryHeap<Feed>> {
+        let conn = self.0.lock().unwrap();
+        let mut feeds = HashMap::<i64, Feed>::new();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, url, last_check, next_check, etag, entry_id
+            FROM feed JOIN entry ON (id = feed_id)",
+        )?;
+        while stmt.next()? == State::Row {
+            feeds.entry(stmt.read(0)?).or_insert_with(|| Feed {
+                url: stmt.read(1).unwrap(),
+                users: Vec::new(),
+                seen_entries: HashSet::new(),
+                last_fetch: Utc.timestamp(stmt.read(2).unwrap(), 0),
+                next_fetch: {
+                    let due = stmt.read::<i64>(3).unwrap();
+                    let now = Utc::now().timestamp();
+                    let delta = due - now;
+                    if delta < 0 {
+                        Instant::now() - Duration::from_secs(-delta as u64)
+                    } else {
+                        Instant::now() + Duration::from_secs(delta as u64)
+                    }
+                },
+                etag: stmt.read(4).unwrap(),
+            });
+        }
+
+        Ok(feeds.into_iter().map(|(_, v)| v).collect())
     }
 
     /*

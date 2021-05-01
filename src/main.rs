@@ -174,7 +174,7 @@ async fn main() {
         .init()
         .unwrap();
 
-    let feeds = Arc::new(Mutex::new(BinaryHeap::new()));
+    let feeds = Arc::new(Mutex::new(db.load_feeds().unwrap()));
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
