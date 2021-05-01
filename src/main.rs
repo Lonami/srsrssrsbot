@@ -4,10 +4,22 @@ use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
 use log;
 use simple_logger::SimpleLogger;
-use std::collections::{BinaryHeap};
+use std::collections::BinaryHeap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::{sleep, Instant};
+
+/// How long to sleep if no feeds have been added yet.
+const NO_FEED_DELAY: Duration = Duration::from_secs(60);
 
 static LOG_LEVEL: &str = env!("LOG_LEVEL");
+
+// Fetch an old feed and then its updated variant to figure out how "new entries" works.
+/*
+static OLD_FEED: &str = env!("OLD_FEED");
+static NEW_FEED: &str = env!("NEW_FEED");
+*/
 
 // Values required by Telegram.
 static TG_API_ID: &str = env!("TG_API_ID");
@@ -37,10 +49,24 @@ fn str_add_err(url: &str, e: feed::Error) -> String {
     format!("Failed to add {} to your list of feeds: {}.", url, e)
 }
 
-async fn step_network(
-    tg: Client,
-    tx: mpsc::UnboundedSender<Update>,
-) -> Client {
+fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
+    let title = feed
+        .title
+        .as_ref()
+        .map(|t| t.content.clone())
+        .unwrap_or_else(|| "(untitled)".to_string());
+
+    let url = feed
+        .links
+        .iter()
+        .next()
+        .map(|link| link.href.clone())
+        .unwrap_or_else(|| "(no online url)".to_string());
+
+    format!("{}\n{}", title, url)
+}
+
+async fn step_network(tg: Client, tx: mpsc::UnboundedSender<Update>) -> Client {
     loop {
         match tg.next_updates().await {
             Ok(Some(updates)) => {
@@ -57,9 +83,12 @@ async fn step_network(
     tg
 }
 
-async fn step_updates(mut tg: Client, mut rx: mpsc::UnboundedReceiver<Update>) {
+async fn step_updates(
+    mut tg: Client,
+    mut rx: mpsc::UnboundedReceiver<Update>,
+    feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>,
+) {
     let http = reqwest::Client::new();
-    let mut feeds = BinaryHeap::new();
 
     while let Some(update) = rx.recv().await {
         match update {
@@ -78,7 +107,7 @@ async fn step_updates(mut tg: Client, mut rx: mpsc::UnboundedReceiver<Update>) {
                         match feed::Feed::new(&http, url, message.sender().unwrap().id()).await {
                             Ok(feed) => {
                                 sent.edit(str_add_ok(url).into()).await.unwrap();
-                                feeds.push(feed);
+                                feeds.lock().unwrap().push(feed);
                             }
                             Err(e) => {
                                 sent.edit(str_add_err(url, e).into()).await.unwrap();
@@ -104,6 +133,38 @@ async fn step_updates(mut tg: Client, mut rx: mpsc::UnboundedReceiver<Update>) {
     }
 }
 
+async fn step_feed(_tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
+    let http = reqwest::Client::new();
+
+    loop {
+        match feeds.lock().unwrap().peek() {
+            Some(feed) => {
+                if let Some(delay) = feed.next_fetch.checked_duration_since(Instant::now()) {
+                    sleep(delay).await;
+                }
+            }
+            None => {
+                sleep(NO_FEED_DELAY).await;
+                continue;
+            }
+        };
+
+        let mut feed = { feeds.lock().unwrap().pop().unwrap() };
+        for entry in feed.check(&http).await.unwrap() {
+            for _user in feed.users.iter() {
+                let _text = str_new_entry(&entry);
+
+                /* TODO send message
+                tg.send_message(&Chat::new(tg.clone(), user), str_new_entry(&entry).into())
+                    .await
+                    .unwrap();
+                */
+            }
+        }
+        feeds.lock().unwrap().push(feed);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     SimpleLogger::new()
@@ -117,6 +178,8 @@ async fn main() {
         })
         .init()
         .unwrap();
+
+    let feeds = Arc::new(Mutex::new(BinaryHeap::new()));
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
@@ -136,7 +199,10 @@ async fn main() {
         client.session().save_to_file(SESSION_NAME).unwrap();
     }
 
-    // Need the `client` to be stepping the network, or the handle methods will never complete.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::join!(step_updates(client.clone(), rx), step_network(client, tx));
+    tokio::join!(
+        step_updates(client.clone(), rx, Arc::clone(&feeds)),
+        step_feed(client.clone(), Arc::clone(&feeds)),
+        step_network(client, tx),
+    );
 }
