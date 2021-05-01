@@ -1,5 +1,6 @@
 mod feed;
 
+use grammers_client::client::chats::InvocationError;
 use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
 use log;
@@ -7,7 +8,6 @@ use simple_logger::SimpleLogger;
 use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::time::{sleep, Instant};
 
 /// How long to sleep if no feeds have been added yet.
@@ -66,74 +66,61 @@ fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
     format!("{}\n{}", title, url)
 }
 
-async fn step_network(tg: Client, tx: mpsc::UnboundedSender<Update>) -> Client {
-    loop {
-        match tg.next_updates().await {
-            Ok(Some(updates)) => {
-                updates.for_each(|update| tx.send(update).map_err(drop).unwrap());
-            }
-            Ok(None) => {
-                break;
-            }
-            Err(e) => {
-                eprintln!("Error reading updates: {}", e);
-            }
-        }
-    }
-    tg
-}
-
-async fn step_updates(
+async fn handle_updates(
     mut tg: Client,
-    mut rx: mpsc::UnboundedReceiver<Update>,
     feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>,
-) {
+) -> Result<(), InvocationError> {
     let http = reqwest::Client::new();
 
-    while let Some(update) = rx.recv().await {
-        match update {
-            Update::NewMessage(message) if !message.outgoing() => {
-                if message.text().starts_with("/start") || message.text().starts_with("/help") {
-                    tg.send_message(&message.chat(), STR_WELCOME.into())
-                        .await
-                        .unwrap();
-                } else if message.text().starts_with("/add") {
-                    if let Some(url) = message.text().split_whitespace().nth(1) {
-                        let mut sent = tg
-                            .send_message(&message.chat(), str_try_add(url).into())
+    while let Some(updates) = tg.next_updates().await? {
+        for update in updates {
+            match update {
+                Update::NewMessage(message) if !message.outgoing() => {
+                    if message.text().starts_with("/start") || message.text().starts_with("/help") {
+                        tg.send_message(&message.chat(), STR_WELCOME.into())
                             .await
                             .unwrap();
+                    } else if message.text().starts_with("/add") {
+                        if let Some(url) = message.text().split_whitespace().nth(1) {
+                            let mut sent = tg
+                                .send_message(&message.chat(), str_try_add(url).into())
+                                .await
+                                .unwrap();
 
-                        match feed::Feed::new(&http, url, message.sender().unwrap().id()).await {
-                            Ok(feed) => {
-                                sent.edit(str_add_ok(url).into()).await.unwrap();
-                                feeds.lock().unwrap().push(feed);
+                            match feed::Feed::new(&http, url, message.sender().unwrap().id()).await
+                            {
+                                Ok(feed) => {
+                                    sent.edit(str_add_ok(url).into()).await.unwrap();
+                                    feeds.lock().unwrap().push(feed);
+                                }
+                                Err(e) => {
+                                    sent.edit(str_add_err(url, e).into()).await.unwrap();
+                                }
                             }
-                            Err(e) => {
-                                sent.edit(str_add_err(url, e).into()).await.unwrap();
-                            }
+                        } else {
+                            tg.send_message(&message.chat(), STR_NO_URL.into())
+                                .await
+                                .unwrap();
                         }
-                    } else {
-                        tg.send_message(&message.chat(), STR_NO_URL.into())
+                    } else if message.text().starts_with("/rm") {
+                        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+                            .await
+                            .unwrap();
+                    } else if message.text().starts_with("/ls") {
+                        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
                             .await
                             .unwrap();
                     }
-                } else if message.text().starts_with("/rm") {
-                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-                        .await
-                        .unwrap();
-                } else if message.text().starts_with("/ls") {
-                    tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-                        .await
-                        .unwrap();
                 }
-            }
-            _ => {}
-        };
+                _ => {}
+            };
+        }
     }
+
+    Ok(())
 }
 
-async fn step_feed(_tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
+async fn handle_feed(_tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
     let http = reqwest::Client::new();
 
     loop {
@@ -199,10 +186,8 @@ async fn main() {
         client.session().save_to_file(SESSION_NAME).unwrap();
     }
 
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::join!(
-        step_updates(client.clone(), rx, Arc::clone(&feeds)),
-        step_feed(client.clone(), Arc::clone(&feeds)),
-        step_network(client, tx),
+        handle_updates(client.clone(), Arc::clone(&feeds)),
+        handle_feed(client, Arc::clone(&feeds))
     );
 }
