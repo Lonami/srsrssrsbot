@@ -44,6 +44,14 @@ fn str_add_err(url: &str, e: feed::Error) -> String {
     format!("Failed to add {} to your list of feeds: {}.", url, e)
 }
 
+fn str_del_ok(url: &str) -> String {
+    format!("You will no longer receive updates from {}.", url)
+}
+
+fn str_del_err(url: &str) -> String {
+    format!("You were not subscribed to {}!", url)
+}
+
 fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
     let title = feed
         .title
@@ -125,10 +133,19 @@ async fn handle_message(
                 .await
                 .unwrap();
         }
-    } else if cmd == "/rm" {
-        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-            .await
-            .unwrap();
+    } else if cmd == "/rm" || cmd == "/del" {
+        let msg = if let Some(url) = message.text().split_whitespace().nth(1) {
+            let user = message.sender().unwrap().pack();
+            if db.try_del_subscriber(url, &user).unwrap() {
+                str_del_ok(url)
+            } else {
+                str_del_err(url)
+            }
+        } else {
+            STR_NO_URL.to_string()
+        };
+
+        tg.send_message(&message.chat(), msg.into()).await.unwrap();
     } else if cmd == "/ls" {
         tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
             .await

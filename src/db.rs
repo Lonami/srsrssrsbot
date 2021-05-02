@@ -199,4 +199,23 @@ impl Database {
 
         Ok(false)
     }
+
+    pub fn try_del_subscriber(&self, url: &str, user: &PackedChat) -> sqlite::Result<bool> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "DELETE FROM subscriber WHERE user = ? AND feed_id = (
+                SELECT id FROM feed WHERE url = ?
+            )",
+        )?;
+        stmt.bind(1, user.to_bytes().as_slice())?;
+        stmt.bind(2, url)?;
+        while stmt.next()? != State::Done {}
+
+        let mut stmt = conn.prepare("SELECT changes()")?;
+        while stmt.next()? == State::Row {
+            return Ok(stmt.read::<i64>(0)? == 1);
+        }
+
+        Ok(false)
+    }
 }
