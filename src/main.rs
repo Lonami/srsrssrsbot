@@ -28,7 +28,7 @@ static STR_WELCOME: &str = r#"Hi, I'm srsrssrs, a serious RSS Rust bot. Sorry if
 
 To get started, /add <FEED URL>. If you get tired of the feed, use /rm <FEED URL>. You can view what feeds you're subscribed to with /ls."#;
 
-static STR_NO_URL: &str = "You need to include the URL after the command.";
+static STR_NO_URL: &str = "You need to include a (valid) URL after the command.";
 
 static STR_NO_FEEDS: &str = "You're not subscribed to any feeds. Here's a good one you could try (wink, wink): https://lonami.dev/blog/atom.xml";
 
@@ -82,6 +82,29 @@ fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
     format!("{}\n{}", title, url)
 }
 
+fn parse_url(url: Option<&str>) -> Option<&str> {
+    let url = match url {
+        Some(url) => url,
+        None => return None,
+    };
+
+    let lower = url.to_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return None;
+    }
+
+    // Quick sanity check. Yes there are ways around this. But this should prevent dumb attempts.
+    // More funny numbers https://daniel.haxx.se/blog/2021/04/19/curl-those-funny-ipv4-addresses/.
+    if lower.starts_with("http://localhost") || lower.starts_with("http://127.0.0.1") {
+        return None;
+    }
+
+    let mut end = url.len();
+    end = end.min(url.find('#').unwrap_or(end));
+    end = end.min(url.find('?').unwrap_or(end));
+    Some(&url[..end])
+}
+
 async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<(), InvocationError> {
     let http = reqwest::Client::new();
 
@@ -117,7 +140,7 @@ async fn handle_message(
             .await
             .unwrap();
     } else if cmd == "/add" {
-        if let Some(url) = message.text().split_whitespace().nth(1) {
+        if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let mut sent = tg
                 .send_message(&message.chat(), str_try_add(url).into())
                 .await
@@ -147,7 +170,7 @@ async fn handle_message(
                 .unwrap();
         }
     } else if cmd == "/rm" || cmd == "/del" {
-        let msg = if let Some(url) = message.text().split_whitespace().nth(1) {
+        let msg = if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let user = message.sender().unwrap().pack();
             if db.try_del_subscriber(url, &user).unwrap() {
                 str_del_ok(url)
