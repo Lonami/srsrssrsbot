@@ -1,5 +1,6 @@
 mod db;
 mod feed;
+mod string;
 
 use grammers_client::client::chats::InvocationError;
 use grammers_client::types::{Chat, Message};
@@ -24,63 +25,6 @@ static DB_NAME: &str = "srsrssrs.db";
 static SESSION_NAME: &str = "srsrssrs.session";
 
 // Strings.
-static STR_WELCOME: &str = r#"Hi, I'm srsrssrs, a serious RSS Rust bot. Sorry if it gave you a stroke to read that.
-
-To get started, /add <FEED URL>. If you get tired of the feed, use /rm <FEED URL>. You can view what feeds you're subscribed to with /ls."#;
-
-static STR_NO_URL: &str = "You need to include a (valid) URL after the command.";
-
-static STR_NO_FEEDS: &str = "You're not subscribed to any feeds. Here's a good one you could try (wink, wink): https://lonami.dev/blog/atom.xml";
-
-fn str_try_add(url: &str) -> String {
-    format!("Trying to add {}...", url)
-}
-
-fn str_add_ok(url: &str) -> String {
-    format!("Added {} to your list of feeds.", url)
-}
-
-fn str_add_err(url: &str, e: feed::Error) -> String {
-    format!("Failed to add {} to your list of feeds: {}.", url, e)
-}
-
-fn str_del_ok(url: &str) -> String {
-    format!("You will no longer receive updates from {}.", url)
-}
-
-fn str_del_err(url: &str) -> String {
-    format!("You were not subscribed to {}!", url)
-}
-
-fn str_feed_list(feeds: &[String]) -> String {
-    if feeds.is_empty() {
-        return STR_NO_FEEDS.to_string();
-    }
-
-    let mut result = "These are your feeds:".to_string();
-    feeds.iter().for_each(|feed| {
-        result.push_str("\n• ");
-        result.push_str(feed);
-    });
-    result
-}
-
-fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
-    let title = feed
-        .title
-        .as_ref()
-        .map(|t| t.content.clone())
-        .unwrap_or_else(|| "(untitled)".to_string());
-
-    let url = feed
-        .links
-        .iter()
-        .next()
-        .map(|link| link.href.clone())
-        .unwrap_or_else(|| "(no online url)".to_string());
-
-    format!("{}\n{}", title, url)
-}
 
 fn parse_url(url: Option<&str>) -> Option<&str> {
     let url = match url {
@@ -136,13 +80,13 @@ async fn handle_message(
     };
 
     if cmd == "/start" || cmd == "/help" {
-        tg.send_message(&message.chat(), STR_WELCOME.into())
+        tg.send_message(&message.chat(), string::WELCOME.into())
             .await
             .unwrap();
     } else if cmd == "/add" {
         if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let mut sent = tg
-                .send_message(&message.chat(), str_try_add(url).into())
+                .send_message(&message.chat(), string::try_add(url).into())
                 .await
                 .unwrap();
 
@@ -160,12 +104,12 @@ async fn handle_message(
             };
 
             if let Some(err) = err {
-                sent.edit(str_add_err(url, err).into()).await.unwrap();
+                sent.edit(string::add_err(url, err).into()).await.unwrap();
             } else {
-                sent.edit(str_add_ok(url).into()).await.unwrap();
+                sent.edit(string::add_ok(url).into()).await.unwrap();
             }
         } else {
-            tg.send_message(&message.chat(), STR_NO_URL.into())
+            tg.send_message(&message.chat(), string::NO_URL.into())
                 .await
                 .unwrap();
         }
@@ -173,12 +117,12 @@ async fn handle_message(
         let msg = if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let user = message.sender().unwrap().pack();
             if db.try_del_subscriber(url, &user).unwrap() {
-                str_del_ok(url)
+                string::del_ok(url)
             } else {
-                str_del_err(url)
+                string::del_err(url)
             }
         } else {
-            STR_NO_URL.to_string()
+            string::NO_URL.to_string()
         };
 
         tg.send_message(&message.chat(), msg.into()).await.unwrap();
@@ -187,7 +131,7 @@ async fn handle_message(
             .get_user_feeds(&message.sender().unwrap().pack())
             .unwrap();
 
-        tg.send_message(&message.chat(), str_feed_list(&feeds).into())
+        tg.send_message(&message.chat(), string::feed_list(&feeds).into())
             .await
             .unwrap();
     }
@@ -203,7 +147,7 @@ async fn handle_feed(mut tg: Client, db: &db::Database) {
         for mut feed in feeds {
             for entry in feed.check(&http).await.unwrap() {
                 for user in feed.users.iter() {
-                    tg.send_message(&user.unpack(), str_new_entry(&entry).into())
+                    tg.send_message(&user.unpack(), string::new_entry(&entry).into())
                         .await
                         .unwrap();
                 }
