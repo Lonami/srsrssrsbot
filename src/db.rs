@@ -71,7 +71,7 @@ impl Database {
         )?;
         conn.execute(
             "CREATE TABLE subscriber (
-            feed_id INTEGER NOT NULL REFERENCES feed (id),
+            feed_id INTEGER NOT NULL REFERENCES feed (id) ON DELETE CASCADE,
             user NOT NULL,
             CONSTRAINT one_sub_per_feed_con UNIQUE (feed_id, user) ON CONFLICT IGNORE)",
         )?;
