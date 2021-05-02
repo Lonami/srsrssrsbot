@@ -197,3 +197,29 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Fetch an old feed and then its updated variant to figure out how "new entries" works.
+    static OLD_FEED: &str = env!("OLD_FEED");
+    static NEW_FEED: &str = env!("NEW_FEED");
+
+    #[test]
+    fn check_feed_fetch_works() -> Result<(), Error> {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let http = reqwest::Client::new();
+            let mut feed = Feed::new(
+                &http,
+                OLD_FEED,
+                PackedChat::from_bytes(&[2, 6, 0, 0, 0, 0]).unwrap(),
+            )
+            .await?;
+            feed.url = NEW_FEED.to_string();
+            assert!(!feed.check(&http).await?.is_empty());
+            Ok(())
+        })
+    }
+}
