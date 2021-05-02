@@ -7,21 +7,13 @@ use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
 use log;
 use simple_logger::SimpleLogger;
-use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::time::{sleep, Instant};
+use tokio::time::sleep;
 
-/// How long to sleep if no feeds have been added yet.
-const NO_FEED_DELAY: Duration = Duration::from_secs(60);
+/// How long to sleep before attempting to check which feeds we need to refetch.
+const FETCH_FEEDS_DELAY: Duration = Duration::from_secs(60);
 
 static LOG_LEVEL: &str = env!("LOG_LEVEL");
-
-// Fetch an old feed and then its updated variant to figure out how "new entries" works.
-/*
-static OLD_FEED: &str = env!("OLD_FEED");
-static NEW_FEED: &str = env!("NEW_FEED");
-*/
 
 // Values required by Telegram.
 static TG_API_ID: &str = env!("TG_API_ID");
@@ -69,11 +61,7 @@ fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
     format!("{}\n{}", title, url)
 }
 
-async fn handle_updates(
-    mut tg: Client,
-    db: db::Database,
-    feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>,
-) -> Result<(), InvocationError> {
+async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<(), InvocationError> {
     let http = reqwest::Client::new();
 
     while let Some(updates) = tg.next_updates().await? {
@@ -82,7 +70,7 @@ async fn handle_updates(
                 Update::NewMessage(message)
                     if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
                 {
-                    handle_message(&mut tg, &http, &db, message, &feeds).await?;
+                    handle_message(&mut tg, &http, &db, message).await?;
                 }
                 _ => {}
             };
@@ -97,7 +85,6 @@ async fn handle_message(
     http: &reqwest::Client,
     db: &db::Database,
     message: Message,
-    feeds: &Arc<Mutex<BinaryHeap<feed::Feed>>>,
 ) -> Result<(), InvocationError> {
     let cmd = match message.text().split_whitespace().next() {
         Some(cmd) => cmd,
@@ -119,7 +106,6 @@ async fn handle_message(
                 Ok(feed) => {
                     sent.edit(str_add_ok(url).into()).await.unwrap();
                     db.add_feed(&feed).unwrap();
-                    feeds.lock().unwrap().push(feed);
                 }
                 Err(e) => {
                     sent.edit(str_add_err(url, e).into()).await.unwrap();
@@ -143,35 +129,22 @@ async fn handle_message(
     Ok(())
 }
 
-async fn handle_feed(mut tg: Client, feeds: Arc<Mutex<BinaryHeap<feed::Feed>>>) {
+async fn handle_feed(mut tg: Client, db: &db::Database) {
     let http = reqwest::Client::new();
 
     loop {
-        let delay = {
-            match feeds.lock().unwrap().peek() {
-                Some(feed) => feed.next_fetch.checked_duration_since(Instant::now()),
-                None => Some(NO_FEED_DELAY),
-            }
-        };
-
-        if let Some(delay) = delay {
-            sleep(delay).await;
-        }
-
-        let mut feed = {
-            match feeds.lock().unwrap().pop() {
-                Some(feed) => feed,
-                None => continue,
-            }
-        };
-        for entry in feed.check(&http).await.unwrap() {
-            for user in feed.users.iter() {
-                tg.send_message(&user.unpack(), str_new_entry(&entry).into())
-                    .await
-                    .unwrap();
+        let feeds = db.load_pending_feeds().unwrap();
+        for mut feed in feeds {
+            for entry in feed.check(&http).await.unwrap() {
+                for user in feed.users.iter() {
+                    tg.send_message(&user.unpack(), str_new_entry(&entry).into())
+                        .await
+                        .unwrap();
+                }
             }
         }
-        feeds.lock().unwrap().push(feed);
+
+        sleep(FETCH_FEEDS_DELAY).await;
     }
 }
 
@@ -191,8 +164,6 @@ async fn main() {
         })
         .init()
         .unwrap();
-
-    let feeds = Arc::new(Mutex::new(db.load_feeds().unwrap()));
 
     let api_id = TG_API_ID.parse().unwrap();
     let mut client = Client::connect(Config {
@@ -216,13 +187,13 @@ async fn main() {
         _ = tokio::signal::ctrl_c() => {
             println!("Got SIGINT; quitting early gracefully");
         }
-        r = handle_updates(client.clone(), db, Arc::clone(&feeds)) => {
+        r = handle_updates(client.clone(), &db) => {
             match r {
                 Ok(_) => println!("Got disconnected from Telegram gracefully"),
                 Err(e) => println!("Error during update handling: {}", e),
             }
         }
-        _ = handle_feed(client.clone(), Arc::clone(&feeds)) => {
+        _ = handle_feed(client.clone(), &db) => {
             println!("Failed to check feed");
         }
     );

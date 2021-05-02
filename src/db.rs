@@ -128,11 +128,16 @@ impl Database {
         )
     }
 
-    pub fn load_feeds(&self) -> sqlite::Result<BinaryHeap<Feed>> {
+    pub fn load_pending_feeds(&self) -> sqlite::Result<BinaryHeap<Feed>> {
         let conn = self.0.lock().unwrap();
         let mut feeds = HashMap::<i64, Feed>::new();
+        let now = Utc::now().timestamp();
 
-        let mut stmt = conn.prepare("SELECT id, url, last_check, next_check, etag FROM feed")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, url, last_check, next_check, etag FROM feed
+            WHERE next_check < ?",
+        )?;
+        stmt.bind(1, now)?;
         while stmt.next()? == State::Row {
             feeds.entry(stmt.read(0)?).or_insert_with(|| Feed {
                 url: stmt.read(1).unwrap(),
@@ -153,14 +158,22 @@ impl Database {
             });
         }
 
-        stmt = conn.prepare("SELECT id, entry_id FROM feed JOIN entry ON (id = feed_id)")?;
+        stmt = conn.prepare(
+            "SELECT id, entry_id FROM feed JOIN entry ON (id = feed_id)
+            WHERE next_check < ?",
+        )?;
+        stmt.bind(1, now)?;
         while stmt.next()? == State::Row {
             if let Some(feed) = feeds.get_mut(&stmt.read(0)?) {
                 feed.seen_entries.insert(stmt.read(1)?);
             }
         }
 
-        stmt = conn.prepare("SELECT id, user FROM feed JOIN subscriber ON (id = feed_id)")?;
+        stmt = conn.prepare(
+            "SELECT id, user FROM feed JOIN subscriber ON (id = feed_id)
+            WHERE next_check < ?",
+        )?;
+        stmt.bind(1, now)?;
         while stmt.next()? == State::Row {
             if let Some(feed) = feeds.get_mut(&stmt.read(0)?) {
                 feed.users
