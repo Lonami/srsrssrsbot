@@ -28,9 +28,9 @@ static STR_WELCOME: &str = r#"Hi, I'm srsrssrs, a serious RSS Rust bot. Sorry if
 
 To get started, /add <FEED URL>. If you get tired of the feed, use /rm <FEED URL>. You can view what feeds you're subscribed to with /ls."#;
 
-static STR_NOT_IMPLEMENTED: &str = "Not yet implemented.";
-
 static STR_NO_URL: &str = "You need to include the URL after the command.";
+
+static STR_NO_FEEDS: &str = "You're not subscribed to any feeds. Here's a good one you could try (wink, wink): https://lonami.dev/blog/atom.xml";
 
 fn str_try_add(url: &str) -> String {
     format!("Trying to add {}...", url)
@@ -50,6 +50,19 @@ fn str_del_ok(url: &str) -> String {
 
 fn str_del_err(url: &str) -> String {
     format!("You were not subscribed to {}!", url)
+}
+
+fn str_feed_list(feeds: &[String]) -> String {
+    if feeds.is_empty() {
+        return STR_NO_FEEDS.to_string();
+    }
+
+    let mut result = "These are your feeds:".to_string();
+    feeds.iter().for_each(|feed| {
+        result.push_str("\n• ");
+        result.push_str(feed);
+    });
+    result
 }
 
 fn str_new_entry(feed: &feed_rs::model::Entry) -> String {
@@ -146,8 +159,12 @@ async fn handle_message(
         };
 
         tg.send_message(&message.chat(), msg.into()).await.unwrap();
-    } else if cmd == "/ls" {
-        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+    } else if cmd == "/ls" || cmd == "/list" {
+        let feeds = db
+            .get_user_feeds(&message.sender().unwrap().pack())
+            .unwrap();
+
+        tg.send_message(&message.chat(), str_feed_list(&feeds).into())
             .await
             .unwrap();
     }

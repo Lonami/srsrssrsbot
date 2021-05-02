@@ -218,4 +218,19 @@ impl Database {
 
         Ok(false)
     }
+
+    pub fn get_user_feeds(&self, user: &PackedChat) -> sqlite::Result<Vec<String>> {
+        let conn = self.0.lock().unwrap();
+        let mut result = Vec::new();
+        let mut stmt = conn.prepare(
+            "SELECT url FROM feed AS f
+            JOIN subscriber AS s ON (f.id = s.feed_id)
+            WHERE s.user = ?",
+        )?;
+        stmt.bind(1, user.to_bytes().as_slice())?;
+        while stmt.next()? != State::Done {
+            result.push(stmt.read(0)?);
+        }
+        Ok(result)
+    }
 }
