@@ -102,14 +102,23 @@ async fn handle_message(
                 .await
                 .unwrap();
 
-            match feed::Feed::new(&http, url, message.sender().unwrap().pack()).await {
-                Ok(feed) => {
-                    sent.edit(str_add_ok(url).into()).await.unwrap();
-                    db.add_feed(&feed).unwrap();
+            let user = message.sender().unwrap().pack();
+            let err = if db.try_add_subscriber(url, &user).unwrap() {
+                None
+            } else {
+                match feed::Feed::new(&http, url, user).await {
+                    Ok(feed) => {
+                        db.add_feed(&feed).unwrap();
+                        None
+                    }
+                    Err(e) => Some(e),
                 }
-                Err(e) => {
-                    sent.edit(str_add_err(url, e).into()).await.unwrap();
-                }
+            };
+
+            if let Some(err) = err {
+                sent.edit(str_add_err(url, err).into()).await.unwrap();
+            } else {
+                sent.edit(str_add_ok(url).into()).await.unwrap();
             }
         } else {
             tg.send_message(&message.chat(), STR_NO_URL.into())

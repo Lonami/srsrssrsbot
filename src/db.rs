@@ -183,4 +183,20 @@ impl Database {
 
         Ok(feeds.into_iter().map(|(_, v)| v).collect())
     }
+
+    pub fn try_add_subscriber(&self, url: &str, user: &PackedChat) -> sqlite::Result<bool> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM feed WHERE url = ?")?;
+        stmt.bind(1, url)?;
+        while stmt.next()? == State::Row {
+            let feed_id = stmt.read::<i64>(0)?;
+            stmt = conn.prepare("INSERT INTO subscriber (feed_id, user) VALUES (?, ?)")?;
+            stmt.bind(1, feed_id)?;
+            stmt.bind(2, user.to_bytes().as_slice())?;
+            while stmt.next()? != State::Done {}
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
 }
