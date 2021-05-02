@@ -2,6 +2,7 @@ mod db;
 mod feed;
 
 use grammers_client::client::chats::InvocationError;
+use grammers_client::types::{Chat, Message};
 use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
 use log;
@@ -78,48 +79,65 @@ async fn handle_updates(
     while let Some(updates) = tg.next_updates().await? {
         for update in updates {
             match update {
-                Update::NewMessage(message) if !message.outgoing() => {
-                    if message.text().starts_with("/start") || message.text().starts_with("/help") {
-                        tg.send_message(&message.chat(), STR_WELCOME.into())
-                            .await
-                            .unwrap();
-                    } else if message.text().starts_with("/add") {
-                        if let Some(url) = message.text().split_whitespace().nth(1) {
-                            let mut sent = tg
-                                .send_message(&message.chat(), str_try_add(url).into())
-                                .await
-                                .unwrap();
-
-                            match feed::Feed::new(&http, url, message.sender().unwrap().pack())
-                                .await
-                            {
-                                Ok(feed) => {
-                                    sent.edit(str_add_ok(url).into()).await.unwrap();
-                                    db.add_feed(&feed).unwrap();
-                                    feeds.lock().unwrap().push(feed);
-                                }
-                                Err(e) => {
-                                    sent.edit(str_add_err(url, e).into()).await.unwrap();
-                                }
-                            }
-                        } else {
-                            tg.send_message(&message.chat(), STR_NO_URL.into())
-                                .await
-                                .unwrap();
-                        }
-                    } else if message.text().starts_with("/rm") {
-                        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-                            .await
-                            .unwrap();
-                    } else if message.text().starts_with("/ls") {
-                        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
-                            .await
-                            .unwrap();
-                    }
+                Update::NewMessage(message)
+                    if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
+                {
+                    handle_message(&mut tg, &http, &db, message, &feeds).await?;
                 }
                 _ => {}
             };
         }
+    }
+
+    Ok(())
+}
+
+async fn handle_message(
+    tg: &mut Client,
+    http: &reqwest::Client,
+    db: &db::Database,
+    message: Message,
+    feeds: &Arc<Mutex<BinaryHeap<feed::Feed>>>,
+) -> Result<(), InvocationError> {
+    let cmd = match message.text().split_whitespace().next() {
+        Some(cmd) => cmd,
+        None => return Ok(()),
+    };
+
+    if cmd == "/start" || cmd == "/help" {
+        tg.send_message(&message.chat(), STR_WELCOME.into())
+            .await
+            .unwrap();
+    } else if cmd == "/add" {
+        if let Some(url) = message.text().split_whitespace().nth(1) {
+            let mut sent = tg
+                .send_message(&message.chat(), str_try_add(url).into())
+                .await
+                .unwrap();
+
+            match feed::Feed::new(&http, url, message.sender().unwrap().pack()).await {
+                Ok(feed) => {
+                    sent.edit(str_add_ok(url).into()).await.unwrap();
+                    db.add_feed(&feed).unwrap();
+                    feeds.lock().unwrap().push(feed);
+                }
+                Err(e) => {
+                    sent.edit(str_add_err(url, e).into()).await.unwrap();
+                }
+            }
+        } else {
+            tg.send_message(&message.chat(), STR_NO_URL.into())
+                .await
+                .unwrap();
+        }
+    } else if cmd == "/rm" {
+        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+            .await
+            .unwrap();
+    } else if cmd == "/ls" {
+        tg.send_message(&message.chat(), STR_NOT_IMPLEMENTED.into())
+            .await
+            .unwrap();
     }
 
     Ok(())

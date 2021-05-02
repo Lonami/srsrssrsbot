@@ -163,7 +163,8 @@ impl Database {
         stmt = conn.prepare("SELECT id, user FROM feed JOIN subscriber ON (id = feed_id)")?;
         while stmt.next()? == State::Row {
             if let Some(feed) = feeds.get_mut(&stmt.read(0)?) {
-                feed.users.push(PackedChat::from_bytes(&stmt.read::<Vec<u8>>(1)?).unwrap());
+                feed.users
+                    .push(PackedChat::from_bytes(&stmt.read::<Vec<u8>>(1)?).unwrap());
             }
         }
 
