@@ -1,5 +1,6 @@
 use crate::feed::Feed;
 use chrono::{TimeZone, Utc};
+use grammers_client::types::chat::PackedChat;
 use sqlite::State;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -131,10 +132,7 @@ impl Database {
         let conn = self.0.lock().unwrap();
         let mut feeds = HashMap::<i64, Feed>::new();
 
-        let mut stmt = conn.prepare(
-            "SELECT id, url, last_check, next_check, etag, entry_id
-            FROM feed JOIN entry ON (id = feed_id)",
-        )?;
+        let mut stmt = conn.prepare("SELECT id, url, last_check, next_check, etag FROM feed")?;
         while stmt.next()? == State::Row {
             feeds.entry(stmt.read(0)?).or_insert_with(|| Feed {
                 url: stmt.read(1).unwrap(),
@@ -153,6 +151,20 @@ impl Database {
                 },
                 etag: stmt.read(4).unwrap(),
             });
+        }
+
+        stmt = conn.prepare("SELECT id, entry_id FROM feed JOIN entry ON (id = feed_id)")?;
+        while stmt.next()? == State::Row {
+            if let Some(feed) = feeds.get_mut(&stmt.read(0)?) {
+                feed.seen_entries.insert(stmt.read(1)?);
+            }
+        }
+
+        stmt = conn.prepare("SELECT id, user FROM feed JOIN subscriber ON (id = feed_id)")?;
+        while stmt.next()? == State::Row {
+            if let Some(feed) = feeds.get_mut(&stmt.read(0)?) {
+                feed.users.push(PackedChat::from_bytes(&stmt.read::<Vec<u8>>(1)?).unwrap());
+            }
         }
 
         Ok(feeds.into_iter().map(|(_, v)| v).collect())
