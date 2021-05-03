@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use grammers_client::types::chat::PackedChat;
 use reqwest::{header, StatusCode};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -139,6 +139,17 @@ impl Feed {
             Err(_) => self.reset_expiry(),
         };
         Ok(entries)
+    }
+
+    pub fn reset_entries(&mut self, entries: &[feed_rs::model::Entry]) {
+        let clear_entries = entries
+            .iter()
+            .map(|entry| &entry.id)
+            .collect::<HashSet<_>>();
+        self.last_fetch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
+        self.etag = None;
+        self.seen_entries
+            .retain(|entry| !clear_entries.contains(&entry));
     }
 
     pub fn reset_expiry(&mut self) {

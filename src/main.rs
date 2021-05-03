@@ -150,33 +150,58 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
 
     loop {
         let feeds = db.load_pending_feeds()?;
+        let mut updated_feeds = Vec::with_capacity(feeds.len());
+
         for mut feed in feeds {
             let entries = match feed.check(&http).await {
                 Ok(entries) => entries,
                 Err(err) => {
                     warn!("failed to fetch {}: {}", feed.url, err);
                     feed.reset_expiry();
+                    updated_feeds.push(feed);
                     continue;
                 }
             };
 
-            for entry in entries {
+            for entry in entries.iter() {
+                let mut fail_count = 0;
                 for user in feed.users.iter() {
                     match tg
-                        .send_message(&user.unpack(), string::new_entry(&entry).into())
+                        .send_message(&user.unpack(), string::new_entry(entry).into())
                         .await
                     {
                         Ok(_) => {}
                         Err(InvocationError::Rpc(rpc)) if rpc.name == "USER_IS_BLOCKED" => {}
                         Err(InvocationError::Rpc(rpc)) => {
-                            info!("failed to notify {}: {}", user, rpc);
+                            fail_count += 1;
+                            info!(
+                                "failed to notify {} about {}/{}: {}",
+                                user, feed.url, entry.id, rpc
+                            );
                         }
                         Err(err) => {
-                            warn!("failed to notify {}: {}", user, err);
+                            fail_count += 1;
+                            warn!(
+                                "failed to notify {} about {}/{}: {}",
+                                user, feed.url, entry.id, err
+                            );
                         }
                     };
                 }
+
+                if fail_count == feed.users.len() {
+                    warn!(
+                        "failed to notify all {} users about {}/{}",
+                        feed.users.len(),
+                        feed.url,
+                        entry.id
+                    );
+                    feed.reset_entries(&entries);
+                    break;
+                }
             }
+
+            updated_feeds.push(feed);
         }
 
         sleep(FETCH_FEEDS_DELAY).await;
