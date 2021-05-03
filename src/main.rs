@@ -58,7 +58,19 @@ async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<()> {
                 Update::NewMessage(message)
                     if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
                 {
-                    handle_message(&mut tg, &http, &db, message).await?;
+                    match handle_message(&mut tg, &http, &db, &message).await {
+                        Ok(_) => {}
+                        Err(err) => match err.downcast::<InvocationError>() {
+                            Ok(err) => match *err {
+                                InvocationError::Rpc(rpc) if rpc.name == "USER_IS_BLOCKED" => {}
+                                InvocationError::Rpc(rpc) => {
+                                    info!("failed to react in {}: {}", message.chat().pack(), rpc)
+                                }
+                                _ => warn!("failed to react in {}: {}", message.chat().pack(), err),
+                            },
+                            Err(err) => return Err(err),
+                        },
+                    };
                 }
                 _ => {}
             };
@@ -72,7 +84,7 @@ async fn handle_message(
     tg: &mut Client,
     http: &reqwest::Client,
     db: &db::Database,
-    message: Message,
+    message: &Message,
 ) -> Result<()> {
     let cmd = match message.text().split_whitespace().next() {
         Some(cmd) => cmd,
