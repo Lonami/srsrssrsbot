@@ -180,6 +180,26 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_feeds_and_entries(&self, feeds: &[Feed]) -> sqlite::Result<()> {
+        let conn = self.0.lock().unwrap();
+        query!(conn."BEGIN");
+        for feed in feeds {
+            let feed_id = match query!(fetch (id: i64) in conn."SELECT id FROM feed WHERE url = ?"(feed.url.as_str()))
+            {
+                Some(id) => id,
+                None => continue,
+            };
+            query!(conn."UPDATE feed SET last_check = ?, next_check = ?, etag = ? WHERE id = ?"(
+                feed.last_fetch.timestamp(), feed.next_fetch_timestamp(), feed.etag.as_deref(), feed_id
+            ));
+            for entry_id in feed.seen_entries.iter() {
+                query!(conn."INSERT INTO entry (feed_id, entry_id) VALUES (?, ?)"(feed_id, entry_id.as_str()));
+            }
+        }
+        query!(conn."COMMIT");
+        Ok(())
+    }
+
     pub fn cleanup_feeds(&self) -> sqlite::Result<()> {
         let conn = self.0.lock().unwrap();
         query!(conn."DELETE FROM feed AS f WHERE NOT EXISTS (

@@ -147,6 +147,7 @@ async fn handle_message(
 
 async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
+    let mut last_save_failed = false;
 
     loop {
         let feeds = db.load_pending_feeds()?;
@@ -204,6 +205,17 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
             updated_feeds.push(feed);
         }
 
+        match db.update_feeds_and_entries(&updated_feeds) {
+            Ok(_) => last_save_failed = false,
+            Err(e) => {
+                warn!("failed to store updated feeds: {}", e);
+                if last_save_failed {
+                    panic!("failed to store updated feeds twice in a row");
+                } else {
+                    last_save_failed = true;
+                }
+            }
+        }
         sleep(FETCH_FEEDS_DELAY).await;
     }
 }
