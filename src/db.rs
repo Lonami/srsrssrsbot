@@ -102,7 +102,7 @@ impl Database {
 
         let version = match conn.prepare("SELECT version FROM version") {
             Ok(mut stmt) => {
-                assert_eq!(State::Row, stmt.next().unwrap());
+                assert_eq!(State::Row, stmt.next()?);
                 stmt.read(0)?
             }
             Err(err) => {

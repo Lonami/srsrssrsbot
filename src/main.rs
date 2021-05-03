@@ -2,7 +2,6 @@ mod db;
 mod feed;
 mod string;
 
-use grammers_client::client::chats::InvocationError;
 use grammers_client::types::{Chat, Message};
 use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
@@ -24,7 +23,7 @@ static BOT_TOKEN: &str = env!("BOT_TOKEN");
 static DB_NAME: &str = "srsrssrs.db";
 static SESSION_NAME: &str = "srsrssrs.session";
 
-// Strings.
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn parse_url(url: Option<&str>) -> Option<&str> {
     let url = match url {
@@ -49,7 +48,7 @@ fn parse_url(url: Option<&str>) -> Option<&str> {
     Some(&url[..end])
 }
 
-async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<(), InvocationError> {
+async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
 
     while let Some(updates) = tg.next_updates().await? {
@@ -73,7 +72,7 @@ async fn handle_message(
     http: &reqwest::Client,
     db: &db::Database,
     message: Message,
-) -> Result<(), InvocationError> {
+) -> Result<()> {
     let cmd = match message.text().split_whitespace().next() {
         Some(cmd) => cmd,
         None => return Ok(()),
@@ -81,22 +80,20 @@ async fn handle_message(
 
     if cmd == "/start" || cmd == "/help" {
         tg.send_message(&message.chat(), string::WELCOME.into())
-            .await
-            .unwrap();
+            .await?;
     } else if cmd == "/add" {
         if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let mut sent = tg
                 .send_message(&message.chat(), string::try_add(url).into())
-                .await
-                .unwrap();
+                .await?;
 
             let user = message.sender().unwrap().pack();
-            let err = if db.try_add_subscriber(url, &user).unwrap() {
+            let err = if db.try_add_subscriber(url, &user)? {
                 None
             } else {
                 match feed::Feed::new(&http, url, user).await {
                     Ok(feed) => {
-                        db.add_feed(&feed).unwrap();
+                        db.add_feed(&feed)?;
                         None
                     }
                     Err(e) => Some(e),
@@ -104,19 +101,18 @@ async fn handle_message(
             };
 
             if let Some(err) = err {
-                sent.edit(string::add_err(url, err).into()).await.unwrap();
+                sent.edit(string::add_err(url, err).into()).await?;
             } else {
-                sent.edit(string::add_ok(url).into()).await.unwrap();
+                sent.edit(string::add_ok(url).into()).await?;
             }
         } else {
             tg.send_message(&message.chat(), string::NO_URL.into())
-                .await
-                .unwrap();
+                .await?;
         }
     } else if cmd == "/rm" || cmd == "/del" {
         let msg = if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let user = message.sender().unwrap().pack();
-            if db.try_del_subscriber(url, &user).unwrap() {
+            if db.try_del_subscriber(url, &user)? {
                 string::del_ok(url)
             } else {
                 string::del_err(url)
@@ -125,31 +121,27 @@ async fn handle_message(
             string::NO_URL.to_string()
         };
 
-        tg.send_message(&message.chat(), msg.into()).await.unwrap();
+        tg.send_message(&message.chat(), msg.into()).await?;
     } else if cmd == "/ls" || cmd == "/list" {
-        let feeds = db
-            .get_user_feeds(&message.sender().unwrap().pack())
-            .unwrap();
+        let feeds = db.get_user_feeds(&message.sender().unwrap().pack())?;
 
         tg.send_message(&message.chat(), string::feed_list(&feeds).into())
-            .await
-            .unwrap();
+            .await?;
     }
 
     Ok(())
 }
 
-async fn handle_feed(mut tg: Client, db: &db::Database) {
+async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
 
     loop {
-        let feeds = db.load_pending_feeds().unwrap();
+        let feeds = db.load_pending_feeds()?;
         for mut feed in feeds {
-            for entry in feed.check(&http).await.unwrap() {
+            for entry in feed.check(&http).await? {
                 for user in feed.users.iter() {
                     tg.send_message(&user.unpack(), string::new_entry(&entry).into())
-                        .await
-                        .unwrap();
+                        .await?;
                 }
             }
         }
@@ -159,9 +151,9 @@ async fn handle_feed(mut tg: Client, db: &db::Database) {
 }
 
 #[tokio::main]
-async fn main() {
-    let db = db::Database::new(DB_NAME).unwrap();
-    db.cleanup_feeds().unwrap();
+async fn main() -> Result<()> {
+    let db = db::Database::new(DB_NAME)?;
+    db.cleanup_feeds()?;
 
     SimpleLogger::new()
         .with_level(match LOG_LEVEL {
@@ -172,25 +164,20 @@ async fn main() {
             "TRACE" => log::LevelFilter::Trace,
             _ => log::LevelFilter::Off,
         })
-        .init()
-        .unwrap();
+        .init()?;
 
-    let api_id = TG_API_ID.parse().unwrap();
+    let api_id = TG_API_ID.parse()?;
     let mut client = Client::connect(Config {
-        session: Session::load_file_or_create(SESSION_NAME).unwrap(),
+        session: Session::load_file_or_create(SESSION_NAME)?,
         api_id,
         api_hash: TG_API_HASH.to_string(),
         params: Default::default(),
     })
-    .await
-    .unwrap();
+    .await?;
 
-    if !client.is_authorized().await.unwrap() {
-        client
-            .bot_sign_in(BOT_TOKEN, api_id, TG_API_HASH)
-            .await
-            .unwrap();
-        client.session().save_to_file(SESSION_NAME).unwrap();
+    if !client.is_authorized().await? {
+        client.bot_sign_in(BOT_TOKEN, api_id, TG_API_HASH).await?;
+        client.session().save_to_file(SESSION_NAME)?;
     }
 
     tokio::select!(
@@ -208,5 +195,6 @@ async fn main() {
         }
     );
 
-    client.session().save_to_file(SESSION_NAME).unwrap();
+    client.session().save_to_file(SESSION_NAME)?;
+    Ok(())
 }
