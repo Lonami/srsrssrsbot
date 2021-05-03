@@ -122,21 +122,23 @@ impl Feed {
         }
 
         let resp = request.send().await?.error_for_status()?;
+        let expiry = find_expiry(resp.headers());
+        let entries = if resp.status().as_u16() == StatusCode::NOT_MODIFIED {
+            Vec::new()
+        } else {
+            let xml = resp.bytes().await?;
+            let mut feed = feed_rs::parser::parse(xml.as_ref())?;
+            feed.entries
+                .retain(|entry| !self.seen_entries.contains(&entry.id));
+            feed.entries
+        };
+
         self.last_fetch = Utc::now();
-        self.next_fetch = match find_expiry(resp.headers()) {
+        self.next_fetch = match expiry {
             Ok(expiry) => expiry,
             Err(_) => Instant::now() + Duration::seconds(10 * 60).to_std().unwrap(),
         };
-        if resp.status().as_u16() == StatusCode::NOT_MODIFIED {
-            return Ok(Vec::new());
-        }
-
-        let xml = resp.bytes().await?;
-        let mut feed = feed_rs::parser::parse(xml.as_ref())?;
-        feed.entries
-            .retain(|entry| !self.seen_entries.contains(&entry.id));
-
-        Ok(feed.entries)
+        Ok(entries)
     }
 
     pub fn next_fetch_timestamp(&self) -> i64 {
