@@ -134,11 +134,15 @@ impl Feed {
         };
 
         self.last_fetch = Utc::now();
-        self.next_fetch = match expiry {
-            Ok(expiry) => expiry,
-            Err(_) => Instant::now() + Duration::seconds(10 * 60).to_std().unwrap(),
+        match expiry {
+            Ok(expiry) => self.next_fetch = expiry,
+            Err(_) => self.reset_expiry(),
         };
         Ok(entries)
+    }
+
+    pub fn reset_expiry(&mut self) {
+        self.next_fetch = Instant::now() + Duration::seconds(10 * 60).to_std().unwrap();
     }
 
     pub fn next_fetch_timestamp(&self) -> i64 {

@@ -2,10 +2,11 @@ mod db;
 mod feed;
 mod string;
 
+use grammers_client::client::chats::InvocationError;
 use grammers_client::types::{Chat, Message};
 use grammers_client::{Client, Config, Update};
 use grammers_session::Session;
-use log;
+use log::{self, info, warn};
 use simple_logger::SimpleLogger;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -138,10 +139,30 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
     loop {
         let feeds = db.load_pending_feeds()?;
         for mut feed in feeds {
-            for entry in feed.check(&http).await? {
+            let entries = match feed.check(&http).await {
+                Ok(entries) => entries,
+                Err(err) => {
+                    warn!("failed to fetch {}: {}", feed.url, err);
+                    feed.reset_expiry();
+                    continue;
+                }
+            };
+
+            for entry in entries {
                 for user in feed.users.iter() {
-                    tg.send_message(&user.unpack(), string::new_entry(&entry).into())
-                        .await?;
+                    match tg
+                        .send_message(&user.unpack(), string::new_entry(&entry).into())
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(InvocationError::Rpc(rpc)) if rpc.name == "USER_IS_BLOCKED" => {}
+                        Err(InvocationError::Rpc(rpc)) => {
+                            info!("failed to notify {}: {}", user, rpc);
+                        }
+                        Err(err) => {
+                            warn!("failed to notify {}: {}", user, err);
+                        }
+                    };
                 }
             }
         }
