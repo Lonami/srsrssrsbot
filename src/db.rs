@@ -165,15 +165,11 @@ impl Database {
             query!(conn."INSERT INTO feed (url, last_check, next_check, etag) VALUES (?, ?, ?, ?)"(
                 feed.url.as_str(), feed.last_fetch.timestamp(), feed.next_fetch_timestamp(), feed.etag.as_deref()
             ));
-
             let feed_id = query!(fetch (id: i64) in conn."SELECT last_insert_rowid()"()).unwrap();
 
             for entry_id in feed.seen_entries.iter() {
                 query!(conn."INSERT INTO entry (feed_id, entry_id) VALUES (?, ?)"(feed_id, entry_id.as_str()));
             }
-
-            query!(conn."DELETE FROM subscriber WHERE feed_id = ?"(feed_id));
-
             for sub in feed.users.iter() {
                 query!(conn."INSERT INTO subscriber (feed_id, user) VALUES (?, ?)"(
                     feed_id, sub.to_bytes().as_slice()
