@@ -52,29 +52,27 @@ fn parse_url(url: Option<&str>) -> Option<&str> {
 async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
 
-    while let Some(updates) = tg.next_updates().await? {
-        for update in updates {
-            match update {
-                Update::NewMessage(message)
-                    if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
-                {
-                    match handle_message(&mut tg, &http, &db, &message).await {
-                        Ok(_) => {}
-                        Err(err) => match err.downcast::<InvocationError>() {
-                            Ok(err) => match *err {
-                                InvocationError::Rpc(rpc) if rpc.name == "USER_IS_BLOCKED" => {}
-                                InvocationError::Rpc(rpc) => {
-                                    info!("failed to react in {}: {}", message.chat().pack(), rpc)
-                                }
-                                _ => warn!("failed to react in {}: {}", message.chat().pack(), err),
-                            },
-                            Err(err) => return Err(err),
+    while let Some(update) = tg.next_update().await? {
+        match update {
+            Update::NewMessage(message)
+                if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
+            {
+                match handle_message(&mut tg, &http, &db, &message).await {
+                    Ok(_) => {}
+                    Err(err) => match err.downcast::<InvocationError>() {
+                        Ok(err) => match *err {
+                            InvocationError::Rpc(rpc) if rpc.name == "USER_IS_BLOCKED" => {}
+                            InvocationError::Rpc(rpc) => {
+                                info!("failed to react in {}: {}", message.chat().pack(), rpc)
+                            }
+                            _ => warn!("failed to react in {}: {}", message.chat().pack(), err),
                         },
-                    };
-                }
-                _ => {}
-            };
-        }
+                        Err(err) => return Err(err),
+                    },
+                };
+            }
+            _ => {}
+        };
     }
 
     Ok(())
