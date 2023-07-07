@@ -94,7 +94,7 @@ async fn handle_message(
             .await?;
     } else if cmd == "/add" {
         if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
-            let mut sent = tg
+            let sent = tg
                 .send_message(&message.chat(), string::try_add(url))
                 .await?;
 
@@ -143,7 +143,7 @@ async fn handle_message(
     Ok(())
 }
 
-async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
+async fn handle_feed(tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
     let mut last_save_failed = false;
 
@@ -235,7 +235,7 @@ async fn main() -> Result<()> {
         .init()?;
 
     let api_id = TG_API_ID.parse()?;
-    let mut client = Client::connect(Config {
+    let client = Client::connect(Config {
         session: Session::load_file_or_create(SESSION_NAME)?,
         api_id,
         api_hash: TG_API_HASH.to_string(),
