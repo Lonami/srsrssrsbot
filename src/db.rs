@@ -218,7 +218,7 @@ impl Database {
                 url,
                 users: Vec::new(),
                 seen_entries: HashSet::new(),
-                last_fetch: Utc.timestamp(last_check, 0),
+                last_fetch: Utc.timestamp_opt(last_check, 0).unwrap(),
                 next_fetch: {
                     let now = Utc::now().timestamp();
                     let delta = next_fetch - now;

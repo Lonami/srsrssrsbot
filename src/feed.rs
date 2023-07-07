@@ -146,7 +146,7 @@ impl Feed {
             .iter()
             .map(|entry| &entry.id)
             .collect::<HashSet<_>>();
-        self.last_fetch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
+        self.last_fetch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_opt(0, 0).unwrap(), Utc);
         self.etag = None;
         self.seen_entries
             .retain(|entry| !clear_entries.contains(&entry));
