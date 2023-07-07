@@ -5,8 +5,8 @@ authors = ["Lonami Exo <totufals@hotmail.com>"]
 edition = "2018"
 
 [dependencies]
-grammers-client = { path = "../grammers/lib/grammers-client" }
-grammers-session = { path = "../grammers/lib/grammers-session" }
+grammers-client = { git = "https://github.com/Lonami/grammers.git", rev = "d91dc82" }
+grammers-session = { git = "https://github.com/Lonami/grammers.git", rev = "d91dc82" }
 reqwest = "0.11.3"
 feed-rs = "0.6.0"
 chrono = "0.4.19"
