@@ -90,12 +90,12 @@ async fn handle_message(
     };
 
     if cmd == "/start" || cmd == "/help" {
-        tg.send_message(&message.chat(), string::WELCOME.into())
+        tg.send_message(&message.chat(), string::WELCOME)
             .await?;
     } else if cmd == "/add" {
         if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
             let mut sent = tg
-                .send_message(&message.chat(), string::try_add(url).into())
+                .send_message(&message.chat(), string::try_add(url))
                 .await?;
 
             let user = message.sender().unwrap().pack();
@@ -112,12 +112,12 @@ async fn handle_message(
             };
 
             if let Some(err) = err {
-                sent.edit(string::add_err(url, err).into()).await?;
+                sent.edit(string::add_err(url, err)).await?;
             } else {
-                sent.edit(string::add_ok(url).into()).await?;
+                sent.edit(string::add_ok(url)).await?;
             }
         } else {
-            tg.send_message(&message.chat(), string::NO_URL.into())
+            tg.send_message(&message.chat(), string::NO_URL)
                 .await?;
         }
     } else if cmd == "/rm" || cmd == "/del" {
@@ -132,11 +132,11 @@ async fn handle_message(
             string::NO_URL.to_string()
         };
 
-        tg.send_message(&message.chat(), msg.into()).await?;
+        tg.send_message(&message.chat(), msg).await?;
     } else if cmd == "/ls" || cmd == "/list" {
         let feeds = db.get_user_feeds(&message.sender().unwrap().pack())?;
 
-        tg.send_message(&message.chat(), string::feed_list(&feeds).into())
+        tg.send_message(&message.chat(), string::feed_list(&feeds))
             .await?;
     }
 
@@ -166,7 +166,7 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
                 let mut fail_count = 0;
                 for user in feed.users.iter() {
                     match tg
-                        .send_message(&user.unpack(), string::new_entry(entry).into())
+                        .send_message(&user.unpack(), string::new_entry(entry))
                         .await
                     {
                         Ok(_) => {}
