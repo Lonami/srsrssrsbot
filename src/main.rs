@@ -166,7 +166,7 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
                 let mut fail_count = 0;
                 for user in feed.users.iter() {
                     match tg
-                        .send_message(&user.unpack(), string::new_entry(entry))
+                        .send_message(*user, string::new_entry(entry))
                         .await
                     {
                         Ok(_) => {}
