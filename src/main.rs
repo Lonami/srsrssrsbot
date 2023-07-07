@@ -52,29 +52,27 @@ fn parse_url(url: Option<&str>) -> Option<&str> {
 async fn handle_updates(mut tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
 
-    while let Some(updates) = tg.next_updates().await? {
-        for update in updates {
-            match update {
-                Update::NewMessage(message)
-                    if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
-                {
-                    match handle_message(&mut tg, &http, &db, &message).await {
-                        Ok(_) => {}
-                        Err(err) => match err.downcast::<InvocationError>() {
-                            Ok(err) => match *err {
-                                InvocationError::Rpc(rpc) if rpc.name == "USER_IS_BLOCKED" => {}
-                                InvocationError::Rpc(rpc) => {
-                                    info!("failed to react in {}: {}", message.chat().pack(), rpc)
-                                }
-                                _ => warn!("failed to react in {}: {}", message.chat().pack(), err),
-                            },
-                            Err(err) => return Err(err),
+    while let Some(update) = tg.next_update().await? {
+        match update {
+            Update::NewMessage(message)
+                if !message.outgoing() && matches!(message.chat(), Chat::User(_)) =>
+            {
+                match handle_message(&mut tg, &http, &db, &message).await {
+                    Ok(_) => {}
+                    Err(err) => match err.downcast::<InvocationError>() {
+                        Ok(err) => match *err {
+                            InvocationError::Rpc(rpc) if rpc.name == "USER_IS_BLOCKED" => {}
+                            InvocationError::Rpc(rpc) => {
+                                info!("failed to react in {}: {}", message.chat().pack(), rpc)
+                            }
+                            _ => warn!("failed to react in {}: {}", message.chat().pack(), err),
                         },
-                    };
-                }
-                _ => {}
-            };
-        }
+                        Err(err) => return Err(err),
+                    },
+                };
+            }
+            _ => {}
+        };
     }
 
     Ok(())
@@ -92,12 +90,12 @@ async fn handle_message(
     };
 
     if cmd == "/start" || cmd == "/help" {
-        tg.send_message(&message.chat(), string::WELCOME.into())
+        tg.send_message(&message.chat(), string::WELCOME)
             .await?;
     } else if cmd == "/add" {
         if let Some(url) = parse_url(message.text().split_whitespace().nth(1)) {
-            let mut sent = tg
-                .send_message(&message.chat(), string::try_add(url).into())
+            let sent = tg
+                .send_message(&message.chat(), string::try_add(url))
                 .await?;
 
             let user = message.sender().unwrap().pack();
@@ -114,12 +112,12 @@ async fn handle_message(
             };
 
             if let Some(err) = err {
-                sent.edit(string::add_err(url, err).into()).await?;
+                sent.edit(string::add_err(url, err)).await?;
             } else {
-                sent.edit(string::add_ok(url).into()).await?;
+                sent.edit(string::add_ok(url)).await?;
             }
         } else {
-            tg.send_message(&message.chat(), string::NO_URL.into())
+            tg.send_message(&message.chat(), string::NO_URL)
                 .await?;
         }
     } else if cmd == "/rm" || cmd == "/del" {
@@ -134,18 +132,18 @@ async fn handle_message(
             string::NO_URL.to_string()
         };
 
-        tg.send_message(&message.chat(), msg.into()).await?;
+        tg.send_message(&message.chat(), msg).await?;
     } else if cmd == "/ls" || cmd == "/list" {
         let feeds = db.get_user_feeds(&message.sender().unwrap().pack())?;
 
-        tg.send_message(&message.chat(), string::feed_list(&feeds).into())
+        tg.send_message(&message.chat(), string::feed_list(&feeds))
             .await?;
     }
 
     Ok(())
 }
 
-async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
+async fn handle_feed(tg: Client, db: &db::Database) -> Result<()> {
     let http = reqwest::Client::new();
     let mut last_save_failed = false;
 
@@ -168,7 +166,7 @@ async fn handle_feed(mut tg: Client, db: &db::Database) -> Result<()> {
                 let mut fail_count = 0;
                 for user in feed.users.iter() {
                     match tg
-                        .send_message(&user.unpack(), string::new_entry(entry).into())
+                        .send_message(*user, string::new_entry(entry))
                         .await
                     {
                         Ok(_) => {}
@@ -237,7 +235,7 @@ async fn main() -> Result<()> {
         .init()?;
 
     let api_id = TG_API_ID.parse()?;
-    let mut client = Client::connect(Config {
+    let client = Client::connect(Config {
         session: Session::load_file_or_create(SESSION_NAME)?,
         api_id,
         api_hash: TG_API_HASH.to_string(),
